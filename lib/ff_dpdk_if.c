@@ -2287,6 +2287,7 @@ main_loop(void *arg)
     }
     printf("Low priority rule created=============\n");
     printf("-- application has started============ --\n");
+    queue_id = HIGH_PRIORITY_QUEUE;
     while (1)
     {
         cur_tsc = rte_rdtsc();
@@ -2326,50 +2327,50 @@ main_loop(void *arg)
         /*
          * Read packet from RX queues
          */
-        for (i = 0; i < 2; ++i)
-        {
-            // printf("hello235\n");
-            port_id = 3;
-            queue_id = i;
-            
-            ctx = veth_ctx[port_id];
+        port_id = 3;
+        
+        
+        ctx = veth_ctx[port_id];
 
-#ifdef FF_KNI
-            if (enable_kni && rte_eal_process_type() == RTE_PROC_PRIMARY)
-            {
-                ff_kni_process(port_id, queue_id, pkts_burst, MAX_PKT_BURST);
+        idle &= !process_dispatch_ring(port_id, queue_id, pkts_burst, ctx);
+
+        nb_rx = rte_eth_rx_burst(port_id, queue_id, pkts_burst,
+                                    MAX_PKT_BURST);
+        int prev_queue_id = queue_id;
+        if (nb_rx == 0){
+            if(prev_queue_id == HIGH_PRIORITY_QUEUE){
+                queue_id = LOW_PRIORITY_QUEUE;
             }
-#endif
-
-            idle &= !process_dispatch_ring(port_id, queue_id, pkts_burst, ctx);
-
-            nb_rx = rte_eth_rx_burst(port_id, queue_id, pkts_burst,
-                                     MAX_PKT_BURST);
-            if (nb_rx == 0)
-                continue;
-            //printf("queue_id : %d, lcore_id : %d\n", queue_id, rte_lcore_id());
-            idle = 0;
-
-            /* Prefetch first packets */
-            for (j = 0; j < PREFETCH_OFFSET && j < nb_rx; j++)
-            {
-                rte_prefetch0(rte_pktmbuf_mtod(
-                    pkts_burst[j], void *));
-            }
-
-            /* Prefetch and handle already prefetched packets */
-            for (j = 0; j < (nb_rx - PREFETCH_OFFSET); j++)
-            {
-                rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[j + PREFETCH_OFFSET], void *));
-                process_packets(port_id, queue_id, &pkts_burst[j], 1, ctx, 0);
-            }
-
-            /* Handle remaining prefetched packets */
-            for (; j < nb_rx; j++)
-            {
-                process_packets(port_id, queue_id, &pkts_burst[j], 1, ctx, 0);
-            }
+            continue;
         }
+        if(prev_queue_id == LOW_PRIORITY_QUEUE){
+            queue_id = HIGH_PRIORITY_QUEUE;
+        }
+            
+
+        printf("queue_id : %d, lcore_id : %d\n", queue_id, rte_lcore_id());
+        idle = 0;
+
+        /* Prefetch first packets */
+        for (j = 0; j < PREFETCH_OFFSET && j < nb_rx; j++)
+        {
+            rte_prefetch0(rte_pktmbuf_mtod(
+                pkts_burst[j], void *));
+        }
+
+        /* Prefetch and handle already prefetched packets */
+        for (j = 0; j < (nb_rx - PREFETCH_OFFSET); j++)
+        {
+            rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[j + PREFETCH_OFFSET], void *));
+            process_packets(port_id, queue_id, &pkts_burst[j], 1, ctx, 0);
+        }
+
+        /* Handle remaining prefetched packets */
+        for (; j < nb_rx; j++)
+        {
+            process_packets(port_id, queue_id, &pkts_burst[j], 1, ctx, 0);
+        }
+    
 
         process_msg_ring(qconf->proc_id, pkts_burst);
 
