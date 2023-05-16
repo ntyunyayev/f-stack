@@ -74,7 +74,7 @@ static int kni_accept;
 static int knictl_action = FF_KNICTL_ACTION_DEFAULT;
 #endif
 /* Utils for custom flow rule */
-#define DEFAULT_PORT 3
+#define DEFAULT_PORT 11
 #define HIGH_PRIORITY_QUEUE 0
 #define LOW_PRIORITY_QUEUE 1
 #define HIGH_PRIORITY_DSCP 1
@@ -2239,7 +2239,7 @@ static int
 main_loop(void *arg)
 {
     struct loop_routine *lr = (struct loop_routine *)arg;
-
+    printf("inside main\n");
     struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
     uint64_t prev_tsc, diff_tsc, cur_tsc, usch_tsc, div_tsc, usr_tsc, sys_tsc, end_tsc, idle_sleep_tsc;
     int i, j, nb_rx, idle;
@@ -2283,7 +2283,7 @@ main_loop(void *arg)
         printf("Flow can't be created %d message: %s\n",
                error.type,
                error.message ? error.message : "(no stated reason)");
-        rte_exit(EXIT_FAILURE, "error in creating flow");
+        return -1;
     }
     printf("Low priority rule created=============\n");
     printf("-- application has started============ --\n");
@@ -2327,28 +2327,27 @@ main_loop(void *arg)
         /*
          * Read packet from RX queues
          */
-        port_id = 3;
+        port_id = DEFAULT_PORT;
         
         
         ctx = veth_ctx[port_id];
 
         idle &= !process_dispatch_ring(port_id, queue_id, pkts_burst, ctx);
-
+        //printf("port_id : %d, queueid :%d\n",port_id, queue_id);
         nb_rx = rte_eth_rx_burst(port_id, queue_id, pkts_burst,
                                     MAX_PKT_BURST);
         int prev_queue_id = queue_id;
-        if (nb_rx == 0){
-            if(prev_queue_id == HIGH_PRIORITY_QUEUE){
-                queue_id = LOW_PRIORITY_QUEUE;
-            }
-            continue;
+        
+        if(prev_queue_id == HIGH_PRIORITY_QUEUE && nb_rx == 0){
+            queue_id = LOW_PRIORITY_QUEUE;
         }
-        if(prev_queue_id == LOW_PRIORITY_QUEUE){
+        else{
             queue_id = HIGH_PRIORITY_QUEUE;
         }
+        
             
 
-        printf("queue_id : %d, lcore_id : %d\n", queue_id, rte_lcore_id());
+        //printf("queue_id : %d, lcore_id : %d\n", queue_id, rte_lcore_id());
         idle = 0;
 
         /* Prefetch first packets */
