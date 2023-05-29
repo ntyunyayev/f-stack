@@ -942,16 +942,18 @@ ngx_worker_process_cycle_loop(void *arg)
 static void
 ngx_worker_process_cycle(ngx_cycle_t *cycle, void *data)
 {
+    printf("hellow1\n");
     ngx_int_t worker = (intptr_t) data;
 
     ngx_process = NGX_PROCESS_WORKER;
     ngx_worker = worker;
-
+    printf("before init\n");
     ngx_worker_process_init(cycle, worker);
-
+    printf("after init\n");
     ngx_setproctitle("worker process");
 
 #if (NGX_HAVE_FSTACK)
+    printf("inside ff_run\n");
     ff_run(ngx_worker_process_cycle_loop, (void *)cycle);
 #else
 
@@ -1013,9 +1015,11 @@ ngx_worker_process_init(ngx_cycle_t *cycle, ngx_int_t worker)
         /* fatal */
         exit(2);
     }
+    printf("hellow23\n");
 
     ccf = (ngx_core_conf_t *) ngx_get_conf(cycle->conf_ctx, ngx_core_module);
 
+    printf("after ccf\n");
     if (worker >= 0 && ccf->priority != 0) {
         if (setpriority(PRIO_PROCESS, 0, ccf->priority) == -1) {
             ngx_log_error(NGX_LOG_ALERT, cycle->log, ngx_errno,
