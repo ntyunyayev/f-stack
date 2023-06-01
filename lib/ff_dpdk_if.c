@@ -2014,7 +2014,7 @@ main_loop(void *arg) {
         drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S * pkt_tx_delay;
     }
     int nb_queues = 4;
-    int weights[] = {100, 75, 50, 25};
+    int weights[] = {100, 30, 10, 3};
     int counter = 0;
     int queuid = 0;
     prev_tsc = 0;
@@ -2095,7 +2095,7 @@ main_loop(void *arg) {
         ctx = veth_ctx[port_id];
 
         idle &= !process_dispatch_ring(port_id, queue_id, pkts_burst, ctx);
-
+        //printf("qid : %d\n", queue_id);
         nb_rx = rte_eth_rx_burst(port_id, queue_id, pkts_burst,
                                  MAX_PKT_BURST);
         int prev_queue_id = queue_id;
