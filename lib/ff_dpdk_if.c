@@ -79,7 +79,9 @@ static int knictl_action = FF_KNICTL_ACTION_DEFAULT;
 #define LOW_PRIORITY_DSCP 2
 #define MAX_PATTERN_NUM 10
 #define MAX_ACTION_NUM 10
-#define NB_PRIORITIES 4
+#define NB_PRIORITIES 8
+#define PRIORITIES_PER_QUEUE 2
+#define STARTING_QUEUE 0
 
 static int numa_on;
 
@@ -276,7 +278,7 @@ init_lcore_conf(void) {
         if (queueid < 0) {
             continue;
         }
-        printf("lcore: %u, port: %u, queue: %u\n", lcore_id, port_id, queueid);
+        printf("lcore: %u, port: %u, queueid: %u\n", lcore_id, port_id, queueid);
         uint16_t nb_rx_queue = lcore_conf.nb_rx_queue;
         lcore_conf.rx_queue_list[nb_rx_queue].port_id = port_id;
         lcore_conf.rx_queue_list[nb_rx_queue].queue_id = queueid;
@@ -2013,8 +2015,8 @@ main_loop(void *arg) {
     if (pkt_tx_delay) {
         drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S * pkt_tx_delay;
     }
-    int nb_queues = 4;
-    int weights[] = {100, 30, 10, 3};
+    int nb_queues = 2;
+    int weights[] = {100, 5};
     int counter = 0;
     int queuid = 0;
     prev_tsc = 0;
@@ -2022,14 +2024,13 @@ main_loop(void *arg) {
 
     qconf = &lcore_conf;
     int lcore_id = rte_lcore_id();
-    printf("lcore_id = %d\n",lcore_id);
-    if (lcore_id != 10) {
+    if ((lcore_id % 2) != 0) {
         /*Temporary hack*/
         return 0;
     }
     struct rte_flow *flow;
     struct rte_flow_error error;
-
+    int starting_queue = lcore_id - STARTING_QUEUE;
     // flow = generate_dscp_rule(DEFAULT_PORT, HIGH_PRIORITY_QUEUE, HIGH_PRIORITY_DSCP, &error);
     // if (!flow)
     // {
@@ -2041,9 +2042,9 @@ main_loop(void *arg) {
     // printf("flow1 created\n");
     /*Creating rule for each queue*/
     printf("before flow create============\n");
-    for (int i = 0; i < NB_PRIORITIES; i++) {
+    printf("starting_queue : %d\n", starting_queue);
+    for (int i = starting_queue; i < PRIORITIES_PER_QUEUE; i++) {
         flow = generate_dscp_rule(DEFAULT_PORT, i, i, &error);
-
         if (!flow) {
             printf("Flow can't be created %d message: %s\n",
                    error.type,
@@ -2054,7 +2055,7 @@ main_loop(void *arg) {
 
     printf("=============Flow created =============\n");
     printf("-- application has started============ --\n");
-    queue_id = HIGH_PRIORITY_QUEUE;
+    queue_id = starting_queue;
     while (1) {
         cur_tsc = rte_rdtsc();
         if (unlikely(freebsd_clock.expire < cur_tsc)) {
@@ -2101,7 +2102,10 @@ main_loop(void *arg) {
         int prev_queue_id = queue_id;
 
         if (nb_rx < 0) {
-            queue_id = (queue_id + 1) % nb_queues;
+            queue_id = (queue_id + 1);
+            if (queue_id > (starting_queue + PRIORITIES_PER_QUEUE)) {
+                queue_id = starting_queue;
+            }
             counter = 0;
             continue;
         }
@@ -2160,9 +2164,12 @@ main_loop(void *arg) {
         ff_top_status.loops++;
 
         counter++;
-        if (counter >= weights[queue_id]) {
+        if (counter >= weights[queue_id - starting_queue]) {
             counter = 0;
-            queue_id = (queue_id + 1) % NB_PRIORITIES;
+            queue_id = (queue_id + 1);
+            if (queue_id > (starting_queue + PRIORITIES_PER_QUEUE)) {
+                queue_id = starting_queue;
+            }
         }
     }
 
@@ -2191,7 +2198,6 @@ void ff_dpdk_run(loop_func_t loop, void *arg) {
                                          sizeof(struct loop_routine), 0);
     lr->loop = loop;
     lr->arg = arg;
-    printf("launching\n");
     rte_eal_mp_remote_launch(main_loop, lr, CALL_MAIN);
     rte_eal_mp_wait_lcore();
     rte_free(lr);
