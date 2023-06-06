@@ -72,7 +72,7 @@ static int kni_accept;
 static int knictl_action = FF_KNICTL_ACTION_DEFAULT;
 #endif
 /* Utils for custom flow rule */
-#define DEFAULT_PORT 11
+#define DEFAULT_PORT 3
 #define HIGH_PRIORITY_QUEUE 0
 #define LOW_PRIORITY_QUEUE 1
 #define HIGH_PRIORITY_DSCP 1
@@ -82,6 +82,9 @@ static int knictl_action = FF_KNICTL_ACTION_DEFAULT;
 #define NB_PRIORITIES 8
 #define PRIORITIES_PER_QUEUE 2
 #define STARTING_QUEUE 0
+#define NB_QUEUE_PER_CORE 2
+#define FIRST_QUEUE 0
+#define NB_QUEUES 16
 
 static int numa_on;
 
@@ -278,6 +281,7 @@ init_lcore_conf(void) {
         if (queueid < 0) {
             continue;
         }
+        
         printf("lcore: %u, port: %u, queueid: %u\n", lcore_id, port_id, queueid);
         uint16_t nb_rx_queue = lcore_conf.nb_rx_queue;
         lcore_conf.rx_queue_list[nb_rx_queue].port_id = port_id;
@@ -287,7 +291,7 @@ init_lcore_conf(void) {
         lcore_conf.tx_queue_id[port_id] = queueid;
         lcore_conf.tx_port_id[lcore_conf.nb_tx_port] = port_id;
         lcore_conf.nb_tx_port++;
-
+        
         /* Enable pcap dump */
         if (ff_global_cfg.pcap.enable) {
             ff_enable_pcap(ff_global_cfg.pcap.save_path, ff_global_cfg.pcap.snap_len);
@@ -406,7 +410,7 @@ init_dispatch_ring(void) {
     for (j = 0; j < nb_ports; j++) {
         uint16_t portid = ff_global_cfg.dpdk.portid_list[j];
         struct ff_port_cfg *pconf = &ff_global_cfg.dpdk.port_cfgs[portid];
-        int nb_queues = pconf->nb_lcores;
+        int nb_queues = (pconf->nb_lcores);
         if (dispatch_ring[portid] == NULL) {
             snprintf(name_buf, RTE_RING_NAMESIZE, "ring_ptr_p%d", portid);
 
@@ -567,6 +571,7 @@ init_kni(void) {
 
 static int
 init_port_start(void) {
+    printf("inside port start\n");
     int nb_ports = ff_global_cfg.dpdk.nb_ports;
     unsigned socketid = 0;
     struct rte_mempool *mbuf_pool;
@@ -575,7 +580,7 @@ init_port_start(void) {
     for (i = 0; i < nb_ports; i++) {
         uint16_t port_id, u_port_id = ff_global_cfg.dpdk.portid_list[i];
         struct ff_port_cfg *pconf = &ff_global_cfg.dpdk.port_cfgs[u_port_id];
-        uint16_t nb_queues = pconf->nb_lcores;
+        uint16_t nb_queues = pconf->nb_lcores * NB_QUEUE_PER_CORE;
 
         if (pconf->nb_slaves > 0) {
             rte_eth_bond_8023ad_dedicated_queues_enable(u_port_id);
@@ -2023,11 +2028,13 @@ main_loop(void *arg) {
     usch_tsc = 0;
 
     qconf = &lcore_conf;
-    int lcore_id = rte_lcore_id();
-    if ((lcore_id % 2) != 0) {
-        /*Temporary hack*/
-        return 0;
-    }
+    unsigned lcore_id = rte_lcore_id();
+    printf("lcore_id!! = %u\n", lcore_id);
+    // if ((lcore_id % 2) != 0) {
+    //     /*Temporary hack*/
+    //     return 0;
+    // }
+
     struct rte_flow *flow;
     struct rte_flow_error error;
     int starting_queue = lcore_id - STARTING_QUEUE;
@@ -2043,19 +2050,23 @@ main_loop(void *arg) {
     /*Creating rule for each queue*/
     printf("before flow create============\n");
     printf("starting_queue : %d\n", starting_queue);
-    for (int i = starting_queue; i < PRIORITIES_PER_QUEUE; i++) {
-        flow = generate_dscp_rule(DEFAULT_PORT, i, i, &error);
-        if (!flow) {
-            printf("Flow can't be created %d message: %s\n",
-                   error.type,
-                   error.message ? error.message : "(no stated reason)");
-            return -1;
+    if (starting_queue == FIRST_QUEUE) {
+        for (int i = FIRST_QUEUE; i < NB_QUEUES; i++) {
+            printf("rule : %d\n", i);
+            flow = generate_dscp_rule(DEFAULT_PORT, i, i, &error);
+            if (!flow) {
+                printf("Flow can't be created %d message: %s\n",
+                       error.type,
+                       error.message ? error.message : "(no stated reason)");
+                return -1;
+            }
         }
     }
 
     printf("=============Flow created =============\n");
     printf("-- application has started============ --\n");
     queue_id = starting_queue;
+    printf("first queue_id : %d\n", queue_id);
     while (1) {
         cur_tsc = rte_rdtsc();
         if (unlikely(freebsd_clock.expire < cur_tsc)) {
@@ -2101,14 +2112,16 @@ main_loop(void *arg) {
                                  MAX_PKT_BURST);
         int prev_queue_id = queue_id;
 
-        if (nb_rx < 0) {
-            queue_id = (queue_id + 1);
-            if (queue_id > (starting_queue + PRIORITIES_PER_QUEUE)) {
-                queue_id = starting_queue;
-            }
-            counter = 0;
-            continue;
-        }
+        // if (nb_rx <= 0) {
+        //     //printf("queue_id : %d\n",queue_id);
+        //     queue_id = (queue_id + 1);
+        //     if (queue_id > (starting_queue + PRIORITIES_PER_QUEUE)) {
+        //         queue_id = starting_queue;
+        //     }
+        //     counter = 0;
+        //     continue;
+        // }
+        //printf("pkt_received : %d\n", queue_id);
 
         //printf("queue_id : %d, lcore_id : %d\n", queue_id, rte_lcore_id());
         idle = 0;
@@ -2163,14 +2176,14 @@ main_loop(void *arg) {
 
         ff_top_status.loops++;
 
-        counter++;
-        if (counter >= weights[queue_id - starting_queue]) {
-            counter = 0;
-            queue_id = (queue_id + 1);
-            if (queue_id > (starting_queue + PRIORITIES_PER_QUEUE)) {
-                queue_id = starting_queue;
-            }
-        }
+        // counter++;
+        // if (counter >= weights[queue_id - starting_queue]) {
+        //     counter = 0;
+        //     queue_id = (queue_id + 1);
+        //     if (queue_id > (starting_queue + PRIORITIES_PER_QUEUE)) {
+        //         queue_id = starting_queue;
+        //     }
+        // }
     }
 
     return 0;
