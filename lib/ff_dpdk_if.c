@@ -84,7 +84,7 @@ static int knictl_action = FF_KNICTL_ACTION_DEFAULT;
 #define STARTING_QUEUE 0
 #define NB_QUEUE_PER_CORE 2
 #define FIRST_QUEUE 0
-#define NB_QUEUES 16
+#define NB_QUEUES 4
 
 static int numa_on;
 
@@ -281,7 +281,7 @@ init_lcore_conf(void) {
         if (queueid < 0) {
             continue;
         }
-        
+
         printf("lcore: %u, port: %u, queueid: %u\n", lcore_id, port_id, queueid);
         uint16_t nb_rx_queue = lcore_conf.nb_rx_queue;
         lcore_conf.rx_queue_list[nb_rx_queue].port_id = port_id;
@@ -291,7 +291,7 @@ init_lcore_conf(void) {
         lcore_conf.tx_queue_id[port_id] = queueid;
         lcore_conf.tx_port_id[lcore_conf.nb_tx_port] = port_id;
         lcore_conf.nb_tx_port++;
-        
+
         /* Enable pcap dump */
         if (ff_global_cfg.pcap.enable) {
             ff_enable_pcap(ff_global_cfg.pcap.save_path, ff_global_cfg.pcap.snap_len);
@@ -410,7 +410,7 @@ init_dispatch_ring(void) {
     for (j = 0; j < nb_ports; j++) {
         uint16_t portid = ff_global_cfg.dpdk.portid_list[j];
         struct ff_port_cfg *pconf = &ff_global_cfg.dpdk.port_cfgs[portid];
-        int nb_queues = (pconf->nb_lcores);
+        int nb_queues = (pconf->nb_lcores) * NB_QUEUE_PER_CORE;
         if (dispatch_ring[portid] == NULL) {
             snprintf(name_buf, RTE_RING_NAMESIZE, "ring_ptr_p%d", portid);
 
@@ -2037,7 +2037,7 @@ main_loop(void *arg) {
 
     struct rte_flow *flow;
     struct rte_flow_error error;
-    int starting_queue = lcore_id - STARTING_QUEUE;
+    int starting_queue = (lcore_id - STARTING_QUEUE) * NB_QUEUE_PER_CORE;
     // flow = generate_dscp_rule(DEFAULT_PORT, HIGH_PRIORITY_QUEUE, HIGH_PRIORITY_DSCP, &error);
     // if (!flow)
     // {
@@ -2048,6 +2048,7 @@ main_loop(void *arg) {
     // }
     // printf("flow1 created\n");
     /*Creating rule for each queue*/
+    sleep(3);
     printf("before flow create============\n");
     printf("starting_queue : %d\n", starting_queue);
     if (starting_queue == FIRST_QUEUE) {
@@ -2061,10 +2062,11 @@ main_loop(void *arg) {
                 return -1;
             }
         }
+        printf("=============Flow created =============\n");
+        printf("-- application has started============ --\n");
     }
-
-    printf("=============Flow created =============\n");
-    printf("-- application has started============ --\n");
+    
+    port_id = DEFAULT_PORT;
     queue_id = starting_queue;
     printf("first queue_id : %d\n", queue_id);
     while (1) {
@@ -2102,28 +2104,27 @@ main_loop(void *arg) {
         /*
          * Read packet from RX queues
          */
-        port_id = DEFAULT_PORT;
 
         ctx = veth_ctx[port_id];
 
         idle &= !process_dispatch_ring(port_id, queue_id, pkts_burst, ctx);
-        //printf("qid : %d\n", queue_id);
+        //printf("queue_id : %d, lcore_id : %d\n", queue_id, rte_lcore_id());
         nb_rx = rte_eth_rx_burst(port_id, queue_id, pkts_burst,
                                  MAX_PKT_BURST);
         int prev_queue_id = queue_id;
 
-        // if (nb_rx <= 0) {
-        //     //printf("queue_id : %d\n",queue_id);
-        //     queue_id = (queue_id + 1);
-        //     if (queue_id > (starting_queue + PRIORITIES_PER_QUEUE)) {
-        //         queue_id = starting_queue;
-        //     }
-        //     counter = 0;
-        //     continue;
-        // }
+        if (nb_rx <= 0) {
+            //printf("queue_id : %d\n",queue_id);
+            queue_id = (queue_id + 1);
+            if (queue_id >= (starting_queue + NB_QUEUE_PER_CORE)) {
+                queue_id = starting_queue;
+            }
+            counter = 0;
+            continue;
+        }
         //printf("pkt_received : %d\n", queue_id);
 
-        //printf("queue_id : %d, lcore_id : %d\n", queue_id, rte_lcore_id());
+        
         idle = 0;
 
         /* Prefetch first packets */
@@ -2176,14 +2177,14 @@ main_loop(void *arg) {
 
         ff_top_status.loops++;
 
-        // counter++;
-        // if (counter >= weights[queue_id - starting_queue]) {
-        //     counter = 0;
-        //     queue_id = (queue_id + 1);
-        //     if (queue_id > (starting_queue + PRIORITIES_PER_QUEUE)) {
-        //         queue_id = starting_queue;
-        //     }
-        // }
+        counter++;
+        if (counter >= weights[queue_id - starting_queue]) {
+            counter = 0;
+            queue_id = (queue_id + 1);
+            if (queue_id >= (starting_queue + PRIORITIES_PER_QUEUE)) {
+                queue_id = starting_queue;
+            }
+        }
     }
 
     return 0;
