@@ -410,7 +410,7 @@ init_dispatch_ring(void) {
     for (j = 0; j < nb_ports; j++) {
         uint16_t portid = ff_global_cfg.dpdk.portid_list[j];
         struct ff_port_cfg *pconf = &ff_global_cfg.dpdk.port_cfgs[portid];
-        int nb_queues = (pconf->nb_lcores);
+        int nb_queues = (pconf->nb_lcores) * NB_QUEUE_PER_CORE;
         if (dispatch_ring[portid] == NULL) {
             snprintf(name_buf, RTE_RING_NAMESIZE, "ring_ptr_p%d", portid);
 
@@ -2022,7 +2022,7 @@ main_loop(void *arg) {
     }
     int nb_queues = 2;
     int weights[] = {10, 2};
-    int queue_counter[] = {0,0}
+    int queue_counter[] = {0, 0};
     int counter = 0;
     int queuid = 0;
     prev_tsc = 0;
@@ -2062,10 +2062,11 @@ main_loop(void *arg) {
                 return -1;
             }
         }
-        printf("=============Flow created =============\n");
-        printf("-- application has started============ --\n");
     }
-    
+
+    printf("=============Flow created =============\n");
+    printf("-- application has started============ --\n");
+
     port_id = DEFAULT_PORT;
     queue_id = starting_queue;
     printf("first queue_id : %d\n", queue_id);
@@ -2107,7 +2108,7 @@ main_loop(void *arg) {
 
         ctx = veth_ctx[port_id];
 
-        idle &= !process_dispatch_ring(port_id, starting_queue, pkts_burst, ctx);
+        idle &= !process_dispatch_ring(port_id, queue_id, pkts_burst, ctx);
         //printf("queue_id : %d, lcore_id : %d\n", queue_id, rte_lcore_id());
         nb_rx = rte_eth_rx_burst(port_id, queue_id, pkts_burst,
                                  MAX_PKT_BURST);
@@ -2123,11 +2124,12 @@ main_loop(void *arg) {
             continue;
         }
 
-        queue_counter[queue_id - starting_queue]+=nb_rx;
-        printf("=====================\n")
-        for (int i = starting_queue; i < NB_QUEUE_PER_CORE; i++) {
-            printf("queue : %d, received : %d\n", i, queue_counter[i]);
+        queue_counter[(queue_id - starting_queue)] += nb_rx;
+        printf("=====================\n");
+        for (int i = 0; i < NB_QUEUE_PER_CORE; i++) {
+            printf("queue : %d, received : %d\n", (starting_queue+i), queue_counter[i]);
         }
+        printf("=====================\n");
         //printf("pkt_received : %d\n", queue_id);
         idle = 0;
         /* Prefetch first packets */
