@@ -72,7 +72,7 @@ static int kni_accept;
 static int knictl_action = FF_KNICTL_ACTION_DEFAULT;
 #endif
 /* Utils for custom flow rule */
-#define DEFAULT_PORT 3
+#define DEFAULT_PORT 0
 #define HIGH_PRIORITY_QUEUE 0
 #define LOW_PRIORITY_QUEUE 1
 #define HIGH_PRIORITY_DSCP 1
@@ -2021,7 +2021,7 @@ main_loop(void *arg) {
         drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S * pkt_tx_delay;
     }
     int nb_queues = 2;
-    int weights[] = {10, 2};
+    int weights[] = {10, 10};
     int queue_counter[] = {0, 0};
     int counter = 0;
     int queuid = 0;
@@ -2069,7 +2069,7 @@ main_loop(void *arg) {
 
     port_id = DEFAULT_PORT;
     queue_id = starting_queue;
-    printf("first queue_id : %d\n", queue_id);
+    //printf("first queue_id : %d\n", queue_id);
     while (1) {
         cur_tsc = rte_rdtsc();
         if (unlikely(freebsd_clock.expire < cur_tsc)) {
@@ -2109,7 +2109,7 @@ main_loop(void *arg) {
         ctx = veth_ctx[port_id];
 
         idle &= !process_dispatch_ring(port_id, queue_id, pkts_burst, ctx);
-        //printf("queue_id : %d, lcore_id : %d\n", queue_id, rte_lcore_id());
+        printf("queue_id : %d, lcore_id : %d\n", queue_id, rte_lcore_id());
         nb_rx = rte_eth_rx_burst(port_id, queue_id, pkts_burst,
                                  MAX_PKT_BURST);
         int prev_queue_id = queue_id;
@@ -2125,11 +2125,13 @@ main_loop(void *arg) {
         }
 
         queue_counter[(queue_id - starting_queue)] += nb_rx;
+
         printf("=====================\n");
         for (int i = 0; i < NB_QUEUE_PER_CORE; i++) {
-            printf("queue : %d, received : %d\n", (starting_queue+i), queue_counter[i]);
+            printf("queue : %d, received : %d\n", (starting_queue + i), queue_counter[i]);
         }
         printf("=====================\n");
+
         //printf("pkt_received : %d\n", queue_id);
         idle = 0;
         /* Prefetch first packets */
@@ -2141,12 +2143,12 @@ main_loop(void *arg) {
         /* Prefetch and handle already prefetched packets */
         for (j = 0; j < (nb_rx - PREFETCH_OFFSET); j++) {
             rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[j + PREFETCH_OFFSET], void *));
-            process_packets(port_id, prev_queue_id, &pkts_burst[j], 1, ctx, 0);
+            process_packets(port_id, lcore_id, &pkts_burst[j], 1, ctx, 0);
         }
 
         /* Handle remaining prefetched packets */
         for (; j < nb_rx; j++) {
-            process_packets(port_id, prev_queue_id, &pkts_burst[j], 1, ctx, 0);
+            process_packets(port_id, lcore_id, &pkts_burst[j], 1, ctx, 0);
         }
 
         process_msg_ring(qconf->proc_id, pkts_burst);
@@ -2191,7 +2193,6 @@ main_loop(void *arg) {
             }
         }
     }
-
     return 0;
 }
 
