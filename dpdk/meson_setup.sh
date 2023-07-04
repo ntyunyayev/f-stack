@@ -1,0 +1,1 @@
+meson setup -Ddisable_drivers=event/octeontx2,event/octeontx,regex/cn9k,regex/octeontx2,net/af_packetn,net/fm10k -Denable_kmods=true -Dprefix=/etinfo/users2/tyunyayev/workspace/f-stack/dpdk/install build
