@@ -1404,8 +1404,7 @@ static inline void
 process_packets(uint16_t port_id, uint16_t queue_id, struct rte_mbuf **bufs,
                 uint16_t count, const struct ff_dpdk_if_context *ctx, int pkts_from_ring) {
     struct lcore_conf *qconf = &lcore_conf;
-    uint16_t nb_queues = qconf->nb_queue_list[port_id];
-
+    uint16_t nb_queues = NB_QUEUES;
     uint16_t i;
     for (i = 0; i < count; i++) {
         struct rte_mbuf *rtem = bufs[i];
@@ -1447,7 +1446,6 @@ process_packets(uint16_t port_id, uint16_t queue_id, struct rte_mbuf **bufs,
                 ret = rte_ring_enqueue(dispatch_ring[port_id][ret], rtem);
                 if (ret < 0)
                     rte_pktmbuf_free(rtem);
-
                 continue;
             }
         }
@@ -2021,12 +2019,13 @@ main_loop(void *arg) {
         drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S * pkt_tx_delay;
     }
     int nb_queues = 2;
-    int weights[] = {10, 10};
+    int weights[] = {1000, 10};
     int queue_counter[] = {0, 0};
     int counter = 0;
     int queuid = 0;
     prev_tsc = 0;
     usch_tsc = 0;
+    uint64_t total_pkt_counter = 0;
 
     qconf = &lcore_conf;
     unsigned lcore_id = rte_lcore_id();
@@ -2054,7 +2053,7 @@ main_loop(void *arg) {
     printf("FIRST_QUEUE : %d\n", FIRST_QUEUE);
     if (starting_queue == FIRST_QUEUE) {
         for (int i = FIRST_QUEUE; i < NB_QUEUES; i++) {
-            printf("rule : %d, lcore_id : %d\n", i,lcore_id);
+            printf("rule updated : %d, lcore_id : %d\n", i, lcore_id);
             flow = generate_dscp_rule(DEFAULT_PORT, i, i, &error);
             if (!flow) {
                 printf("Flow can't be created %d message: %s\n",
@@ -2124,6 +2123,26 @@ main_loop(void *arg) {
             counter = 0;
             continue;
         }
+        // for (int i = 0; i < nb_rx; i++) {
+        //     struct rte_mbuf *pkt = pkts_burst[i];
+        //     struct rte_ether_hdr *eth_hdr =
+        //         (struct rte_ether_hdr *)(rte_pktmbuf_mtod(pkt, char *));
+        //     //printf("eth_hdr->ether_type : %d\n", eth_hdr->ether_type);
+        //     if (eth_hdr->ether_type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+        //         //printf("inside if2 \n");
+        //         struct rte_ipv4_hdr *ip_hdr;
+        //         struct rte_tcp_hdr *tcp_hdr;
+        //         ip_hdr = (struct rte_ipv4_hdr *)(rte_pktmbuf_mtod(pkt, char *) +
+        //                                          sizeof(struct rte_ether_hdr));
+
+        //         size_t ip_payload_len = htons(ip_hdr->total_length) - sizeof(struct rte_ipv4_hdr);
+        //         printf("qid : %d, dscp : %d\n", queue_id, (ip_hdr->type_of_service) >> 2);
+        //         //printf("ip_payload_len : %ld\n", ip_payload_len);
+        //         if (ip_hdr->next_proto_id == IPPROTO_TCP) {
+        //             printf("TCP PACKET : qid : %d, dscp : %d\n", queue_id, (ip_hdr->type_of_service) >> 2);
+        //         }
+        //     }
+        // }
 
         queue_counter[(queue_id - starting_queue)] += nb_rx;
 
@@ -2144,12 +2163,12 @@ main_loop(void *arg) {
         /* Prefetch and handle already prefetched packets */
         for (j = 0; j < (nb_rx - PREFETCH_OFFSET); j++) {
             rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[j + PREFETCH_OFFSET], void *));
-            process_packets(port_id, lcore_id, &pkts_burst[j], 1, ctx, 0);
+            process_packets(port_id, queue_id, &pkts_burst[j], 1, ctx, 0);
         }
 
         /* Handle remaining prefetched packets */
         for (; j < nb_rx; j++) {
-            process_packets(port_id, lcore_id, &pkts_burst[j], 1, ctx, 0);
+            process_packets(port_id, queue_id, &pkts_burst[j], 1, ctx, 0);
         }
 
         process_msg_ring(qconf->proc_id, pkts_burst);
@@ -2186,6 +2205,11 @@ main_loop(void *arg) {
         ff_top_status.loops++;
 
         counter++;
+        total_pkt_counter++;
+
+        printf("=========\ntotal_pkt_counter : %lu, lcore : %d\n===================\n", total_pkt_counter,lcore_id);
+        //printf("counter : %d\n",counter);
+        //printf("counter reached : %d, queue_id : %d\n",counter,queue_id);
         if (counter >= weights[queue_id - starting_queue]) {
             counter = 0;
             queue_id = (queue_id + 1);
