@@ -1247,7 +1247,6 @@ ff_veth_input(const struct ff_dpdk_if_context *ctx, struct rte_mbuf *pkt) {
             return;
         }
     }
-
     void *data = rte_pktmbuf_mtod(pkt, void *);
     uint16_t len = rte_pktmbuf_data_len(pkt);
 
@@ -1406,6 +1405,7 @@ process_packets(uint16_t port_id, uint16_t queue_id, struct rte_mbuf **bufs,
     struct lcore_conf *qconf = &lcore_conf;
     uint16_t nb_queues = NB_QUEUES;
     uint16_t i;
+    //printf("inside process\n");
     for (i = 0; i < count; i++) {
         struct rte_mbuf *rtem = bufs[i];
 
@@ -1424,6 +1424,7 @@ process_packets(uint16_t port_id, uint16_t queue_id, struct rte_mbuf **bufs,
         }
 
         if (!pkts_from_ring && packet_dispatcher) {
+            printf("inside !pkts_from_ring && packet_dispatcher\n");
             uint64_t cur_tsc = rte_rdtsc();
             int ret = (*packet_dispatcher)(data, &len, queue_id, nb_queues);
             usr_cb_tsc += rte_rdtsc() - cur_tsc;
@@ -1526,6 +1527,7 @@ process_dispatch_ring(uint16_t port_id, uint16_t queue_id,
                                    (void **)pkts_burst, MAX_PKT_BURST, NULL);
 
     if (nb_rb > 0) {
+        printf("process_dispatch_ring\n");
         process_packets(port_id, queue_id, pkts_burst, nb_rb, ctx, 1);
     }
 
@@ -1790,7 +1792,7 @@ send_burst(struct lcore_conf *qconf, uint16_t n, uint8_t port) {
 #endif
         } while (++ret < n);
     }
-    return 0;
+    return ret;
 }
 
 /* Enqueue a single packet, and send burst if queue is filled */
@@ -2014,7 +2016,7 @@ main_loop(void *arg) {
     uint64_t drain_tsc = 0;
     struct ff_dpdk_if_context *ctx;
     int cycle_counter = 0;
-
+    uint64_t nb_send = 0;
     if (pkt_tx_delay) {
         drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S * pkt_tx_delay;
     }
@@ -2026,7 +2028,9 @@ main_loop(void *arg) {
     prev_tsc = 0;
     usch_tsc = 0;
     uint64_t total_pkt_counter = 0;
-
+    uint64_t syn_counter = 0;
+    uint64_t syn_counter_small = 0;
+    uint64_t syn_counter_big = 0;
     qconf = &lcore_conf;
     unsigned lcore_id = rte_lcore_id();
     printf("lcore_id!! = %u\n", lcore_id);
@@ -2093,7 +2097,7 @@ main_loop(void *arg) {
 
                 idle = 0;
 
-                send_burst(qconf,
+                nb_send += send_burst(qconf,
                            qconf->tx_mbufs[port_id].len,
                            port_id);
                 qconf->tx_mbufs[port_id].len = 0;
@@ -2123,34 +2127,44 @@ main_loop(void *arg) {
             counter = 0;
             continue;
         }
-        // for (int i = 0; i < nb_rx; i++) {
-        //     struct rte_mbuf *pkt = pkts_burst[i];
-        //     struct rte_ether_hdr *eth_hdr =
-        //         (struct rte_ether_hdr *)(rte_pktmbuf_mtod(pkt, char *));
-        //     //printf("eth_hdr->ether_type : %d\n", eth_hdr->ether_type);
-        //     if (eth_hdr->ether_type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-        //         //printf("inside if2 \n");
-        //         struct rte_ipv4_hdr *ip_hdr;
-        //         struct rte_tcp_hdr *tcp_hdr;
-        //         ip_hdr = (struct rte_ipv4_hdr *)(rte_pktmbuf_mtod(pkt, char *) +
-        //                                          sizeof(struct rte_ether_hdr));
+        for (int i = 0; i < nb_rx; i++) {
+            struct rte_mbuf *pkt = pkts_burst[i];
+            struct rte_ether_hdr *eth_hdr =
+                (struct rte_ether_hdr *)(rte_pktmbuf_mtod(pkt, char *));
+            //printf("eth_hdr->ether_type : %d\n", eth_hdr->ether_type);
+            if (eth_hdr->ether_type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+                //printf("inside if2 \n");
+                struct rte_ipv4_hdr *ip_hdr;
+                struct rte_tcp_hdr *tcp_hdr;
+                ip_hdr = (struct rte_ipv4_hdr *)(rte_pktmbuf_mtod(pkt, char *) +
+                                                 sizeof(struct rte_ether_hdr));
 
-        //         size_t ip_payload_len = htons(ip_hdr->total_length) - sizeof(struct rte_ipv4_hdr);
-        //         printf("qid : %d, dscp : %d\n", queue_id, (ip_hdr->type_of_service) >> 2);
-        //         //printf("ip_payload_len : %ld\n", ip_payload_len);
-        //         if (ip_hdr->next_proto_id == IPPROTO_TCP) {
-        //             printf("TCP PACKET : qid : %d, dscp : %d\n", queue_id, (ip_hdr->type_of_service) >> 2);
-        //         }
-        //     }
-        // }
+                //printf("qid : %d, dscp : %d\n", queue_id, (ip_hdr->type_of_service) >> 2);
+                //printf("ip_payload_len : %ld\n", ip_payload_len);
+                if (ip_hdr->next_proto_id == IPPROTO_TCP) {
+                    //printf("TCP PACKET : qid : %d, dscp : %d\n", queue_id, (ip_hdr->type_of_service) >> 2);
+                    tcp_hdr = (struct rte_tcp_hdr *)((unsigned char *)ip_hdr +
+                                                     sizeof(struct rte_ipv4_hdr));
+                    if(tcp_hdr->tcp_flags & RTE_TCP_SYN_FLAG){
+                        syn_counter++;
+                        if(queue_id%2==0){
+                            syn_counter_small++;
+                        }
+                        else{
+                            syn_counter_big++;
+                        }
+                    }
+                }
+            }
+        }
 
         queue_counter[(queue_id - starting_queue)] += nb_rx;
 
-        // printf("=====================\n");
-        // for (int i = 0; i < NB_QUEUE_PER_CORE; i++) {
-        //     printf("queue : %d, received : %d\n", (starting_queue + i), queue_counter[i]);
-        // }
-        // printf("=====================\n");
+        printf("=====================\n");
+        for (int i = 0; i < NB_QUEUE_PER_CORE; i++) {
+            printf("queue : %d, received : %d, lcore_id : %d\n", (starting_queue + i), queue_counter[i], lcore_id);
+        }
+        printf("=====================\n");
 
         //printf("pkt_received : %d\n", queue_id);
         idle = 0;
@@ -2206,9 +2220,10 @@ main_loop(void *arg) {
 
         counter++;
         total_pkt_counter++;
-
-        printf("=========\ntotal_pkt_counter : %lu, lcore : %d\n===================\n", total_pkt_counter,lcore_id);
+        //printf("=========\ntotal_pkt_counter : %lu, lcore : %d\n===================\n", total_pkt_counter,lcore_id);
+        //printf("=========\ntotal syn small: %lu, lcore : %d\n===================\n", syn_counter,lcore_id);
         //printf("counter : %d\n",counter);
+        printf("nb_send : %ld, lcore_id : %d\n",nb_send,lcore_id);
         //printf("counter reached : %d, queue_id : %d\n",counter,queue_id);
         if (counter >= weights[queue_id - starting_queue]) {
             counter = 0;
