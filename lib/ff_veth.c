@@ -360,6 +360,7 @@ ff_veth_process_packet(void *arg, void *m)
     mb->m_pkthdr.rcvif = ifp;
 
     ifp->if_input(ifp, mb);
+    
 }
 
 static int

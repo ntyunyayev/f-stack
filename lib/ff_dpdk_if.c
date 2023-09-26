@@ -1522,12 +1522,13 @@ static inline int
 process_dispatch_ring(uint16_t port_id, uint16_t queue_id,
                       struct rte_mbuf **pkts_burst, const struct ff_dpdk_if_context *ctx) {
     /* read packet from ring buf and to process */
+    
     uint16_t nb_rb;
     nb_rb = rte_ring_dequeue_burst(dispatch_ring[port_id][queue_id],
                                    (void **)pkts_burst, MAX_PKT_BURST, NULL);
 
     if (nb_rb > 0) {
-        printf("process_dispatch_ring\n");
+        printf("inside proces dispatch ring\n");
         process_packets(port_id, queue_id, pkts_burst, nb_rb, ctx, 1);
     }
 
@@ -2160,11 +2161,11 @@ main_loop(void *arg) {
 
         queue_counter[(queue_id - starting_queue)] += nb_rx;
 
-        printf("=====================\n");
-        for (int i = 0; i < NB_QUEUE_PER_CORE; i++) {
-            printf("queue : %d, received : %d, lcore_id : %d\n", (starting_queue + i), queue_counter[i], lcore_id);
-        }
-        printf("=====================\n");
+        // printf("=====================\n");
+        // for (int i = 0; i < NB_QUEUE_PER_CORE; i++) {
+        //     printf("queue : %d, received : %d, lcore_id : %d\n", (starting_queue + i), queue_counter[i], lcore_id);
+        // }
+        // printf("=====================\n");
 
         //printf("pkt_received : %d\n", queue_id);
         idle = 0;
@@ -2223,7 +2224,7 @@ main_loop(void *arg) {
         //printf("=========\ntotal_pkt_counter : %lu, lcore : %d\n===================\n", total_pkt_counter,lcore_id);
         //printf("=========\ntotal syn small: %lu, lcore : %d\n===================\n", syn_counter,lcore_id);
         //printf("counter : %d\n",counter);
-        printf("nb_send : %ld, lcore_id : %d\n",nb_send,lcore_id);
+        // printf("nb_send : %ld, lcore_id : %d\n",nb_send,lcore_id);
         //printf("counter reached : %d, queue_id : %d\n",counter,queue_id);
         if (counter >= weights[queue_id - starting_queue]) {
             counter = 0;
